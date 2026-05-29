@@ -28,22 +28,31 @@ const char* WIRE_NAME[] = {"rot", "gelb"};
 const int NUM_WIRES = sizeof(WIRE_PIN) / sizeof(WIRE_PIN[0]);
 const int CORRECT_WIRE = 1;                // Index 1 = "gelb"
 
+// Joystick: NUR ADC1-Pins (32-39), da ADC2 bei aktivem WLAN blockiert ist.
+// VCC an 3V3 (nicht 5V!), sonst >3,3V am ADC. Achsen 0..4095 (12-bit).
+const int PIN_JOY_X = 34;                  // VRx -> ADC1
+const int PIN_JOY_Y = 35;                  // VRy -> ADC1
+const int JOY_LOW  = 1000;                 // Ausschlag-Schwellen um die Mitte (~2048)
+const int JOY_HIGH = 3000;
+
 // ---------- Spielkonfiguration ----------
 const float GAME_TIME = 150.0;             // Sekunden bis Boom
 const char* WIRE_HINT = "Do not cut red. The solution shines like the sun.";
 
 // ---------- Minispiele ----------
-enum StageKind { DISTANCE_HOLD, DISTANCE_WIRE_PULL };
+enum StageKind { DISTANCE_HOLD, DISTANCE_WIRE_PULL, JOYSTICK_SEQUENCE };
 struct Stage {
   StageKind kind;
   const char* title;
   const char* instruction;
   float zmin, zmax, hold_s, scale_max, limit_s;   // limit_s: time budget for this level
   int wire;                                       // fuer DISTANCE_WIRE_PULL
+  const char* seq;                                // fuer JOYSTICK_SEQUENCE: Ziel aus U/D/L/R
 };
 Stage STAGES[] = {
-  {DISTANCE_WIRE_PULL, "Resonance Distance", "Use the box grid to find the safe distance. Hold that distance and pull the matching wire.", 12, 14, 0.0, 40, 45, 1},
-  {DISTANCE_HOLD,      "Fallback",           "Now move farther away: hold your hand at 25-35 cm for 3 seconds.",                                      25, 35, 3.0, 40, 30, -1},
+  {DISTANCE_HOLD, "Approach", "Hold your hand steady at about 25 cm (20-30 cm) for 3 seconds.", 20, 30, 3.0, 40, 30, -1, ""},
+  {DISTANCE_HOLD, "Retreat",  "Now move farther away: hold your hand at 35-45 cm for 3 seconds.", 35, 45, 3.0, 40, 30, -1, ""},
+  {JOYSTICK_SEQUENCE, "Sequence", "Move the joystick in order: up, right, down, left.", 0, 0, 0.0, 0, 45, -1, "URDL"},
 };
 const int NUM_STAGES = sizeof(STAGES) / sizeof(STAGES[0]);
 
@@ -60,6 +69,8 @@ String pendingEvent = "";        // one-shot: level_passed|level_failed|defused|
 int    pendingLevel = 0;         // 1-basierte Level-Nummer zum Event
 bool wireBaseline[NUM_WIRES];
 bool stageWireBaseline[NUM_WIRES];
+String joyInput = "";            // bisher korrekt eingegebene Joystick-Richtungen
+bool   joyNeutral = true;        // true = Stick mittig, bereit fuer naechste Eingabe
 
 void emitEvent(const char* type, int level) { pendingEvent = type; pendingLevel = level; }
 
@@ -86,7 +97,30 @@ float timeLeft() {
 
 void resetStageRuntime() {
   holdStart = 0; held = 0; progress = 0;
+  joyInput = ""; joyNeutral = true;
   for (int i = 0; i < NUM_WIRES; i++) stageWireBaseline[i] = wireIntact(i);
+}
+
+char joyDir() {
+  int x = analogRead(PIN_JOY_X);
+  int y = analogRead(PIN_JOY_Y);
+  if (y > JOY_HIGH) return 'U';
+  if (y < JOY_LOW)  return 'D';
+  if (x > JOY_HIGH) return 'R';
+  if (x < JOY_LOW)  return 'L';
+  return 0;                       // mittig
+}
+
+String joyWords(const char* seq) {
+  String s = "";
+  for (int i = 0; seq[i]; i++) {
+    if (i) s += "-";
+    switch (seq[i]) {
+      case 'U': s += "up";    break; case 'D': s += "down";  break;
+      case 'L': s += "left";  break; case 'R': s += "right"; break;
+    }
+  }
+  return s;
 }
 
 int pulledStageWire() {
@@ -142,6 +176,26 @@ void stepStage() {
     return;
   }
   int rem = (int)(st.limit_s - elapsed);
+
+  if (st.kind == JOYSTICK_SEQUENCE) {
+    char d = joyDir();
+    if (d == 0) {
+      joyNeutral = true;                       // zurueck in der Mitte: bereit
+    } else if (joyNeutral) {
+      joyNeutral = false;                      // ein Ausschlag = eine Eingabe
+      if (d == st.seq[joyInput.length()]) {
+        joyInput += d;
+        if ((int)joyInput.length() >= (int)strlen(st.seq)) { advanceStage(); return; }
+      } else {
+        joyInput = "";                         // falsche Richtung: Sequenz zuruecksetzen
+      }
+    }
+    int total = strlen(st.seq);
+    progress = total ? (float)joyInput.length() / total : 0.0;
+    message = "Joystick sequence " + joyWords(st.seq) + "  ·  " + String((int)joyInput.length()) + "/" + String(total) + "  ·  " + String(rem) + "s left";
+    return;
+  }
+
   curD = readDistanceCm();
   bool inZone = curD >= st.zmin && curD <= st.zmax;
   if (st.kind == DISTANCE_WIRE_PULL) {
