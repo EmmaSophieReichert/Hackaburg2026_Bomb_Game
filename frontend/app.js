@@ -1,11 +1,10 @@
-// Bomb Defusal — Frontend-Logik. WebSocket-Client: empfaengt ~15x/s den
-// Spielzustand vom Controller (server.py bzw. ESP), rendert ihn datengetrieben
-// (Timer, Aufgabe, Gauge, Draehte, Level-Event-Toast) und sendet start/reset
-// zurueck. Wird als /app.js ausgeliefert; Quelle fuer app_js.h
-// (sync_frontend.py) — hier editieren, nicht im generierten Header.
+// Bomb Defusal — frontend logic. WebSocket client receives controller state
+// about 15x/s, renders the timer/task/wires/toasts, and sends actions back.
+// Served as /app.js; source for app_js.h via sync_frontend.py.
 
 const MAX_CM = 40;
 let ws, wiresBuilt = false;
+let demoMode = localStorage.getItem("bomb-demo-mode") === "1";
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
@@ -16,16 +15,21 @@ function connect() {
 function setConn(live) {
   const c = document.getElementById("conn");
   c.className = "conn " + (live ? "live" : "dead");
-  document.getElementById("conn-label").textContent = live ? "verbunden" : "getrennt";
+  document.getElementById("conn-label").textContent = live ? "connected" : "offline";
 }
 function send(action) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ action })); }
+function setDemoMode(on) {
+  demoMode = on;
+  document.body.classList.toggle("demo-mode", demoMode);
+  document.getElementById("mode-toggle").textContent = demoMode ? "DEMO" : "PROD";
+  localStorage.setItem("bomb-demo-mode", demoMode ? "1" : "0");
+}
 
-// one-shot Level-Event vom Controller (kommt genau einen Tick lang im Stream)
 const EVENT_MAP = {
-  level_passed: ["good", n => `Level ${n} bestanden`],
-  level_failed: ["bad",  n => `Level ${n} gefailed`],
-  defused:      ["good", () => "Bombe entschaerft"],
-  exploded:     ["bad",  () => "Bombe explodiert"],
+  level_passed: ["good", n => `Level ${n} cleared`],
+  level_failed: ["bad",  n => `Level ${n} failed`],
+  defused:      ["good", () => "Bomb defused"],
+  exploded:     ["bad",  () => "Bomb exploded"],
 };
 let toastTimer = null;
 function showEvent(type, level) {
@@ -40,11 +44,12 @@ function showEvent(type, level) {
 
 function buildWires(colors) {
   const box = document.getElementById("wires");
+  const labels = { rot: "red", blau: "blue", gruen: "green", gelb: "yellow" };
   box.innerHTML = "";
   colors.forEach(c => {
     const w = document.createElement("div");
     w.className = "wire lbl-" + c;
-    w.innerHTML = `<span class="wire-strip ${c}"></span><span class="wire-label">${c}</span>`;
+    w.innerHTML = `<span class="wire-strip ${c}"></span><span class="wire-label">${labels[c] || c}</span>`;
     box.appendChild(w);
   });
   wiresBuilt = true;
@@ -55,7 +60,7 @@ function render(s) {
   document.getElementById("message").textContent = s.message;
   document.getElementById("stagecount").textContent =
     (s.phase === "STAGE" || s.phase === "WIRE")
-      ? `Aufgabe ${s.stage_index} / ${s.stage_total}` : "—";
+      ? `Task ${s.stage_index} / ${s.stage_total}` : "—";
 
   // timer
   const t = document.getElementById("timer");
@@ -67,50 +72,30 @@ function render(s) {
     t.className = "timer" + (s.time_left < 10 ? " danger" : s.time_left < 30 ? " warn" : "");
   }
 
-  // task card (only during a minigame stage)
   const task = document.getElementById("task");
   if (s.phase === "STAGE" && s.title) {
     task.style.display = "block";
-    document.getElementById("task-title").textContent = `Aufgabe ${s.stage_index}: ${s.title}`;
+    document.getElementById("task-title").textContent = `Task ${s.stage_index}: ${s.title}`;
     document.getElementById("task-instr").textContent = s.instruction;
     document.getElementById("progress").style.width = (100 * s.progress) + "%";
   } else {
     task.style.display = "none";
   }
 
-  // gauge (only when the current stage provides one)
-  const gw = document.getElementById("gauge-wrap");
-  if (s.gauge) {
-    gw.classList.remove("hidden");
-    const g = s.gauge, max = g.scale_max;
-    const zone = document.getElementById("zone");
-    zone.style.left = (100 * g.min / max) + "%";
-    zone.style.width = (100 * (g.max - g.min) / max) + "%";
-    const needle = document.getElementById("needle");
-    needle.style.left = Math.min(100, 100 * g.value / max) + "%";
-    const inZone = g.value >= g.min && g.value <= g.max;
-    needle.className = "gauge-needle" + (inZone ? " inzone" : "");
-    document.getElementById("dist").textContent = g.value + " cm";
-    document.getElementById("scale-max").textContent = max + " cm";
-  } else {
-    gw.classList.add("hidden");
-  }
-
-  // hint (wire phase)
   const hint = document.getElementById("hint");
   if (s.hint) { hint.classList.add("show"); document.getElementById("hint-text").textContent = s.hint; }
   else hint.classList.remove("show");
 
-  // wires
   if (!wiresBuilt && s.wires) buildWires(s.wires);
   document.getElementById("wires").classList.toggle("armed", s.phase === "WIRE");
 
-  // one-shot Level-Event (Backend setzt es genau einen Broadcast lang)
   if (s.event) showEvent(s.event, s.event_level);
 }
 
 // staggered entry reveal
 window.addEventListener("load", () => {
+  document.getElementById("mode-toggle").addEventListener("click", () => setDemoMode(!demoMode));
+  setDemoMode(demoMode);
   document.querySelectorAll(".reveal").forEach(el => {
     setTimeout(() => el.classList.add("in"), parseInt(el.dataset.delay || 0));
   });
