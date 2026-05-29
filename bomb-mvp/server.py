@@ -59,10 +59,11 @@ class Stage:
 class DistanceHold(Stage):
     """Hand fuer hold_s Sekunden in [zmin, zmax] cm halten (Ultraschall)."""
 
-    def __init__(self, title, instruction, zmin, zmax, hold_s, scale_max=40):
+    def __init__(self, title, instruction, zmin, zmax, hold_s, scale_max=40, limit_s=30):
         self.title = title
         self.instruction = instruction
         self.zmin, self.zmax, self.hold_s, self.scale_max = zmin, zmax, hold_s, scale_max
+        self.limit_s = limit_s          # Zeitbudget fuers Level; abgelaufen = Level gefailed
         self.reset()
 
     def reset(self):
@@ -119,6 +120,9 @@ class Game:
         self.phase = "IDLE"          # IDLE, STAGE, WIRE, DEFUSED, EXPLODED
         self.idx = 0
         self.t_end = None
+        self.stage_start = None      # monotonic-Start des aktuellen Levels
+        self.event = ""              # one-shot: level_passed|level_failed|defused|exploded
+        self.event_level = 0         # 1-basierte Level-Nummer zum Event
         self.message = "Druecke START zum Scharfschalten."
         self.wire_baseline = {}
         for s in STAGES:
@@ -135,6 +139,7 @@ class Game:
         self.phase = "STAGE"
         self.idx = 0
         self.t_end = time.monotonic() + GAME_TIME
+        self.stage_start = time.monotonic()
         STAGES[0].reset()
 
     def to_dict(self):
@@ -150,6 +155,8 @@ class Game:
             "gauge": cur.gauge() if cur else None,
             "message": self.message,
             "hint": WIRE_HINT if self.phase == "WIRE" else "",
+            "event": self.event,
+            "event_level": self.event_level,
             "wires": WIRE_COLORS,
         }
 
@@ -158,35 +165,55 @@ game = Game()
 
 
 def step():
+    wire_level = len(STAGES) + 1            # das Draht-Finale ist das letzte Level
+
     if game.phase in ("STAGE", "WIRE") and game.time_left <= 0:
+        game.event = "exploded"
+        game.event_level = wire_level if game.phase == "WIRE" else game.idx + 1
         game.phase = "EXPLODED"
         game.message = "BOOM. Zeit abgelaufen."
         return
 
     if game.phase == "STAGE":
         cur = STAGES[game.idx]
+        elapsed = time.monotonic() - game.stage_start if game.stage_start else 0.0
+        if elapsed > cur.limit_s:
+            game.event = "level_failed"
+            game.event_level = game.idx + 1
+            game.phase = "EXPLODED"
+            game.message = f"BOOM. Level {game.idx + 1} nicht rechtzeitig geschafft."
+            return
+        rem = max(0.0, cur.limit_s - elapsed)
         solved = cur.update()
         if isinstance(cur, DistanceHold) and cur.hold_start is not None and not solved:
-            game.message = f"Halten... {cur.held:.1f}/{cur.hold_s:.0f}s"
+            game.message = f"Halten... {cur.held:.1f}/{cur.hold_s:.0f}s  ·  noch {rem:.0f}s"
         elif not solved:
-            game.message = "Bring dich in die Zielzone."
+            game.message = f"Bring dich in die Zielzone.  ·  noch {rem:.0f}s"
         if solved:
+            passed = game.idx + 1
             game.idx += 1
+            game.event = "level_passed"
+            game.event_level = passed
             if game.idx >= len(STAGES):
                 game.phase = "WIRE"
                 game.message = "Letzte Phase: entschaerfe die Bombe."
                 game.wire_baseline = {c: wire_intact(c) for c in WIRE_COLORS}
             else:
                 STAGES[game.idx].reset()
+                game.stage_start = time.monotonic()
                 game.message = "Stufe geschafft. Naechste Aufgabe."
 
     elif game.phase == "WIRE":
         for c in WIRE_COLORS:
             if game.wire_baseline.get(c, True) and not wire_intact(c):
                 if c == CORRECT_WIRE:
+                    game.event = "defused"
+                    game.event_level = wire_level
                     game.phase = "DEFUSED"
                     game.message = "ENTSCHAERFT. Gut gemacht."
                 else:
+                    game.event = "exploded"
+                    game.event_level = wire_level
                     game.phase = "EXPLODED"
                     game.message = f"BOOM. {c.upper()} war falsch."
                 return
@@ -209,6 +236,8 @@ async def game_loop():
                 dead.append(ws)
         for ws in dead:
             clients.discard(ws)
+        game.event = ""          # Event ist one-shot: nach genau einem Broadcast loeschen
+        game.event_level = 0
         await asyncio.sleep(TICK)
 
 
@@ -219,7 +248,7 @@ async def _startup():
 
 @app.get("/")
 async def index():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "index.html"))
+    return FileResponse(os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html"))
 
 
 @app.websocket("/ws")

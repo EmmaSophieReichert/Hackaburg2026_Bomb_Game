@@ -1,15 +1,16 @@
-// Bomb Defusal — ESP32 standalone (kein Pi).
-// ESP32 spannt einen eigenen WLAN-Access-Point auf, liefert das Frontend
-// (index_html.h) aus und broadcastet den Spielzustand per WebSocket.
-// Portiert aus bomb-mvp/server.py — gleicher JSON-Datenvertrag.
+// Bomb Defusal — ESP8266 standalone (kein Pi).
+// Portierung von bomb-esp32/bomb-esp32.ino — gleiche Spiellogik, gleiches
+// Frontend (index_html.h), gleicher WebSocket-JSON-Datenvertrag.
+// Unterschiede zur ESP32-Version: ESP8266-WiFi-/AsyncTCP-Header und
+// ESP8266-taugliche Pin-Belegung (GPIO 18/19/21/22/23 existieren hier nicht).
 //
 // Benoetigte Libraries (Arduino IDE -> Library Manager):
-//   - "ESP Async WebServer"  (ESP32Async / mathieucarbou Fork)
-//   - "Async TCP"            (passende AsyncTCP-Lib fuer ESP32)
-// Board: ein beliebiges ESP32-Dev-Board.
+//   - "ESPAsyncWebServer"  (me-no-dev / ESP32Async, ESP8266-tauglich)
+//   - "ESPAsyncTCP"        (ESP8266-Variante von AsyncTCP)
+// Board: ein beliebiges ESP8266-Dev-Board (NodeMCU / Wemos D1 mini).
 
-#include <WiFi.h>
-#include <AsyncTCP.h>
+#include <ESP8266WiFi.h>
+#include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include "index_html.h"
 
@@ -17,10 +18,13 @@
 const char* AP_SSID = "BOMB-DEFUSAL";
 const char* AP_PASS = "defuse123";        // min. 8 Zeichen; "" = offenes Netz
 
-// ---------- Pins (ESP32, 3.3V!) ----------
-const int PIN_TRIG = 5;                    // HC-SR04 Trigger
-const int PIN_ECHO = 18;                   // HC-SR04 Echo -> SPANNUNGSTEILER auf 3.3V!
-const int WIRE_PIN[4] = {21, 22, 23, 19};  // rot, blau, gruen, gelb -> jeweils gegen GND
+// ---------- Pins (ESP8266, 3.3V!) ----------
+// TRIG ist Ausgang -> GPIO16 (D0) ist ok. ECHO/Draehte nur auf Pins ohne
+// Boot-Zwaenge: GPIO 4,5,12,13,14 (D2,D1,D6,D7,D5). Alle Draht-Pins koennen
+// internen Pull-up.
+const int PIN_TRIG = 16;                   // HC-SR04 Trigger (D0)
+const int PIN_ECHO = 4;                    // HC-SR04 Echo (D2) -> SPANNUNGSTEILER auf 3.3V!
+const int WIRE_PIN[4] = {5, 14, 12, 13};   // rot(D1), blau(D5), gruen(D6), gelb(D7) -> gegen GND
 const char* WIRE_NAME[4] = {"rot", "blau", "gruen", "gelb"};
 const int CORRECT_WIRE = 1;                // Index 1 = "blau"
 

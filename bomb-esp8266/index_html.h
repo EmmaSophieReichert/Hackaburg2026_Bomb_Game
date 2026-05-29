@@ -1,4 +1,10 @@
-<!DOCTYPE html>
+#pragma once
+#include <pgmspace.h>
+
+// AUTOGENERIERT von sync_frontend.py aus frontend/index.html — NICHT direkt
+// editieren. Frontend-Aenderungen in frontend/index.html machen und das Skript
+// erneut laufen lassen.
+const char INDEX_HTML[] PROGMEM = R"rawhtml(<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
@@ -220,6 +226,25 @@ main { position: relative; z-index: 1; flex: 1; display: grid; place-items: cent
 .reveal { opacity: 0; transform: translateY(22px); filter: blur(6px); }
 .reveal.in { opacity: 1; transform: translateY(0); filter: blur(0); transition: opacity 0.8s var(--ease), transform 0.9s var(--spring), filter 0.8s var(--ease); }
 
+/* ---- level event toast ---- */
+.toast {
+  position: fixed; top: 92px; left: 50%; z-index: 60; pointer-events: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 20px 13px 16px; border-radius: 14px;
+  font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.04em;
+  background: rgba(20,27,39,0.92); border: 1px solid var(--hair); color: var(--ink);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 30px 60px -30px rgba(0,0,0,0.95);
+  opacity: 0; transform: translate(-50%, -14px) scale(0.96);
+  transition: opacity 0.35s var(--ease), transform 0.5s var(--spring);
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.toast::before { content: ""; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.toast.good { border-color: rgba(126,231,135,0.4); }
+.toast.good::before { background: var(--green); box-shadow: 0 0 12px var(--green); }
+.toast.bad { border-color: rgba(255,93,93,0.45); }
+.toast.bad::before { background: var(--red); box-shadow: 0 0 12px var(--red); }
+
 @media (max-width: 600px) {
   .timer { font-size: 68px; }
   .panel { padding: 22px 18px; }
@@ -230,6 +255,7 @@ main { position: relative; z-index: 1; flex: 1; display: grid; place-items: cent
 <body>
 <div class="ambient" aria-hidden="true"></div>
 <div class="grain" aria-hidden="true"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <div class="nav-wrap">
   <nav class="nav reveal" data-delay="0">
@@ -322,6 +348,24 @@ function setConn(live) {
 }
 function send(action) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ action })); }
 
+// one-shot Level-Event vom Controller (kommt genau einen Tick lang im Stream)
+const EVENT_MAP = {
+  level_passed: ["good", n => `Level ${n} bestanden`],
+  level_failed: ["bad",  n => `Level ${n} gefailed`],
+  defused:      ["good", () => "Bombe entschaerft"],
+  exploded:     ["bad",  () => "Bombe explodiert"],
+};
+let toastTimer = null;
+function showEvent(type, level) {
+  const e = EVENT_MAP[type];
+  if (!e) return;
+  const t = document.getElementById("toast");
+  t.textContent = e[1](level);
+  t.className = "toast " + e[0] + " show";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = "toast " + e[0]; }, 2600);
+}
+
 function buildWires(colors) {
   const box = document.getElementById("wires");
   box.innerHTML = "";
@@ -388,6 +432,9 @@ function render(s) {
   // wires
   if (!wiresBuilt && s.wires) buildWires(s.wires);
   document.getElementById("wires").classList.toggle("armed", s.phase === "WIRE");
+
+  // one-shot Level-Event (Backend setzt es genau einen Broadcast lang)
+  if (s.event) showEvent(s.event, s.event_level);
 }
 
 // staggered entry reveal
@@ -400,3 +447,4 @@ connect();
 </script>
 </body>
 </html>
+)rawhtml";
