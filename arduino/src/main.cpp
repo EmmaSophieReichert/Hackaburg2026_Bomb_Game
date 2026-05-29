@@ -2,12 +2,12 @@
 #include <HCSR04.h>
 
 // Initialize the wires
-const byte RED_WIRE = 7;
+const byte RED_WIRE = 17;
 const byte YELLOW_WIRE = 8;
 
 // Initialize the ultrasonic sensor
-const byte TRIGGER_PIN = 12;
-const byte ECHO_PIN = 11;
+const byte TRIGGER_PIN = 34;
+const byte ECHO_PIN = 35;
 UltraSonicDistanceSensor distanceSensor(TRIGGER_PIN, ECHO_PIN);
 
 // Initialize the joystick
@@ -127,7 +127,7 @@ void loop() {
   double yAxis = analogRead(JOYSTICK_Y);
 
   processUltrasonic(redWire);
-  processJoystick(xAxis, yAxis, yellowWire);
+  //processJoystick(xAxis, yAxis, yellowWire);
 
   // Reset the bomb
   if (bombActive && redWireCut && yellowWireCut) {
