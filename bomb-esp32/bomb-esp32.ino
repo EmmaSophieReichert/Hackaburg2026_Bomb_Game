@@ -155,7 +155,8 @@ void stepStage() {
       }
       return;
     }
-    message = "Hold the safe distance and pull the matching wire. Current distance " + String(curD, 1) + " cm  ·  " + String(rem) + "s left";
+    String distStr = curD >= 999.0 ? "out of range" : String(curD, 1) + " cm";
+    message = "Hold the safe distance and pull the matching wire. Current distance " + distStr + "  ·  " + String(rem) + "s left";
     return;
   }
   if (inZone) {
