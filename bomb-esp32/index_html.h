@@ -5,12 +5,11 @@
 // Frontend-Aenderungen in frontend/index.html machen und das Skript erneut laufen lassen.
 const char INDEX_HTML[] PROGMEM = R"rawhtml(<!DOCTYPE html>
 <!--
-  Bomb Defusal — Frontend (Markup + CSS). Einzige Quelle, wird von server.py
-  bzw. den ESP-Sketches unter "/" ausgeliefert. Die Logik liegt in app.js
-  (eingebunden via <script src="/app.js">). Aus dieser Datei wird index_html.h
-  generiert (sync_frontend.py) — hier editieren, nie im Header.
+  Bomb Defusal — Frontend (Markup + CSS). Single source, served by server.py
+  and the ESP sketches at "/". Logic lives in app.js. index_html.h is
+  generated from this file via sync_frontend.py — edit here, never the header.
 -->
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -90,6 +89,14 @@ body {
 .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); transition: background 0.4s var(--ease), box-shadow 0.4s var(--ease); }
 .conn.live .conn-dot { background: var(--green); box-shadow: 0 0 10px var(--green); }
 .conn.dead .conn-dot { background: var(--red); box-shadow: 0 0 10px var(--red); }
+.mode-toggle {
+  display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--hair);
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: 0.12em;
+  cursor: pointer; transition: color 0.3s var(--ease), border-color 0.3s var(--ease), background 0.3s var(--ease);
+}
+.mode-toggle:hover { background: rgba(255,255,255,0.055); color: var(--ink); }
+body.demo-mode .mode-toggle { color: var(--yellow); border-color: rgba(255,209,102,0.38); background: rgba(255,209,102,0.08); }
 
 main { position: relative; z-index: 1; flex: 1; display: grid; place-items: center; padding: 56px 18px 80px; }
 .console { width: 100%; max-width: 540px; display: flex; flex-direction: column; gap: 22px; }
@@ -207,7 +214,7 @@ main { position: relative; z-index: 1; flex: 1; display: grid; place-items: cent
 .wire .gelb { background: var(--yellow); color: var(--yellow); } .wire.lbl-gelb .wire-label { color: var(--yellow); }
 
 /* ---- CTA: button-in-button ---- */
-.toolbar { display: flex; gap: 12px; }
+.toolbar { display: flex; gap: 12px; flex-wrap: wrap; }
 .tool {
   flex: 1; display: inline-flex; align-items: center; justify-content: space-between; gap: 12px;
   font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--ink);
@@ -226,6 +233,8 @@ main { position: relative; z-index: 1; flex: 1; display: grid; place-items: cent
 .tool.primary { background: rgba(255,93,143,0.13); border-color: rgba(255,93,143,0.42); color: #ffd1de; }
 .tool.primary:hover { background: rgba(255,93,143,0.2); }
 .tool.primary .ic { background: rgba(255,93,143,0.22); }
+.tool.demo-tool { display: none; }
+body.demo-mode .tool.demo-tool { display: inline-flex; }
 
 /* ---- entry motion ---- */
 .reveal { opacity: 0; transform: translateY(22px); filter: blur(6px); }
@@ -278,8 +287,9 @@ main { position: relative; z-index: 1; flex: 1; display: grid; place-items: cent
       </span>
     </div>
     <div class="conn" id="conn">
-      <span class="conn-dot"></span><span id="conn-label">verbinde…</span>
+      <span class="conn-dot"></span><span id="conn-label">connecting...</span>
     </div>
+    <button class="mode-toggle" id="mode-toggle" type="button">PROD</button>
   </nav>
 </div>
 
@@ -294,31 +304,21 @@ main { position: relative; z-index: 1; flex: 1; display: grid; place-items: cent
         </div>
         <div class="state-row"><span class="chip" id="chip">IDLE</span></div>
         <div class="timer" id="timer">2:30</div>
-        <div class="message" id="message">Druecke START zum Scharfschalten.</div>
+        <div class="message" id="message">Press START to arm the device.</div>
 
         <div class="task" id="task" style="display:none">
-          <div class="task-title" id="task-title">Aufgabe</div>
+          <div class="task-title" id="task-title">Task</div>
           <div class="task-instr" id="task-instr"></div>
           <div class="progress"><div class="progress-fill" id="progress"></div></div>
         </div>
 
-        <div class="gauge-wrap hidden" id="gauge-wrap">
-          <div class="gauge">
-            <div class="gauge-zone" id="zone"></div>
-            <div class="gauge-needle" id="needle" style="left:0%"></div>
-          </div>
-          <div class="gauge-foot">
-            <span>0 cm</span><span class="dist" id="dist">– cm</span><span id="scale-max">40 cm</span>
-          </div>
-        </div>
-
-        <div class="hint" id="hint"><strong>Hinweis</strong><span id="hint-text"></span></div>
+        <div class="hint" id="hint"><strong>Hint</strong><span id="hint-text"></span></div>
       </section>
     </div>
 
     <div class="bezel reveal" data-delay="200">
       <section class="panel">
-        <div class="panel-head"><span class="led"></span>Drahtbank <span class="panel-sub">cut the right one</span></div>
+        <div class="panel-head"><span class="led"></span>Wire Bank <span class="panel-sub">cut the right one</span></div>
         <div class="wires" id="wires"></div>
       </section>
     </div>
@@ -331,6 +331,10 @@ main { position: relative; z-index: 1; flex: 1; display: grid; place-items: cent
       <button class="tool" onclick="send('reset')">
         RESET
         <span class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12a7 7 0 107-7 7 7 0 00-5.2 2.3M5 4.5V8h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </button>
+      <button class="tool demo-tool" onclick="send('advance')">
+        DEMO NEXT
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="M5 5.5v13l9-6.5zM17 6v12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </button>
     </div>
   </div>

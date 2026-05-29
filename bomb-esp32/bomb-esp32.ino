@@ -27,17 +27,20 @@ const int CORRECT_WIRE = 1;                // Index 1 = "blau"
 
 // ---------- Spielkonfiguration ----------
 const float GAME_TIME = 150.0;             // Sekunden bis Boom
-const char* WIRE_HINT = "Schneide nicht Rot. Die Loesung ist kuehl wie das Meer.";
+const char* WIRE_HINT = "Do not cut red. The solution is cool as the sea.";
 
 // ---------- Minispiele ----------
+enum StageKind { DISTANCE_HOLD, DISTANCE_WIRE_PULL };
 struct Stage {
+  StageKind kind;
   const char* title;
   const char* instruction;
-  float zmin, zmax, hold_s, scale_max, limit_s;   // limit_s: Zeitbudget; abgelaufen = Level gefailed
+  float zmin, zmax, hold_s, scale_max, limit_s;   // limit_s: time budget for this level
+  int wire;                                       // fuer DISTANCE_WIRE_PULL
 };
 Stage STAGES[] = {
-  {"Annaeherung", "Halte die Hand 3 s ruhig in 10-15 cm vor den Sensor.", 10, 15, 3.0, 40, 30},
-  {"Rueckzug",    "Jetzt weiter weg: Hand 3 s in 25-35 cm halten.",       25, 35, 3.0, 40, 30},
+  {DISTANCE_WIRE_PULL, "Resonance Distance", "Use the box grid to find the safe distance. Hold that distance and pull the matching wire.", 12, 14, 0.0, 40, 45, 1},
+  {DISTANCE_HOLD,      "Fallback",           "Now move farther away: hold your hand at 25-35 cm for 3 seconds.",                                      25, 35, 3.0, 40, 30, -1},
 };
 const int NUM_STAGES = sizeof(STAGES) / sizeof(STAGES[0]);
 
@@ -49,10 +52,11 @@ unsigned long tEnd = 0;          // millis bei Boom; 0 = nicht gestartet
 unsigned long holdStart = 0;     // millis seit in Zone; 0 = nicht in Zone
 unsigned long stageStart = 0;    // millis-Start des aktuellen Levels; 0 = nicht gestartet
 float held = 0, curD = 0, progress = 0;
-String message = "Druecke START zum Scharfschalten.";
+String message = "Press START to arm the device.";
 String pendingEvent = "";        // one-shot: level_passed|level_failed|defused|exploded
 int    pendingLevel = 0;         // 1-basierte Level-Nummer zum Event
 bool wireBaseline[4];
+bool stageWireBaseline[4];
 
 void emitEvent(const char* type, int level) { pendingEvent = type; pendingLevel = level; }
 
@@ -77,29 +81,52 @@ float timeLeft() {
   return rem > 0 ? rem / 1000.0 : 0.0;
 }
 
+void resetStageRuntime() {
+  holdStart = 0; held = 0; progress = 0;
+  for (int i = 0; i < 4; i++) stageWireBaseline[i] = wireIntact(i);
+}
+
+int pulledStageWire() {
+  for (int i = 0; i < 4; i++) {
+    if (stageWireBaseline[i] && !wireIntact(i)) return i;
+  }
+  return -1;
+}
+
 void resetGame() {
   phase = IDLE; idx = 0; tEnd = 0; holdStart = 0; stageStart = 0; held = 0; curD = 0; progress = 0;
   pendingEvent = ""; pendingLevel = 0;
-  message = "Druecke START zum Scharfschalten.";
+  message = "Press START to arm the device.";
 }
 void startGame() {
   resetGame();
   phase = STAGE; idx = 0;
   tEnd = millis() + (unsigned long)(GAME_TIME * 1000);
+  resetStageRuntime();
   stageStart = millis();
 }
 void enterWire() {
   phase = WIRE;
-  message = "Letzte Phase: entschaerfe die Bombe.";
+  message = "Final phase: defuse the bomb.";
   for (int i = 0; i < 4; i++) wireBaseline[i] = wireIntact(i);
 }
 void advanceStage() {
   int passed = idx + 1;            // gerade abgeschlossenes Level
   idx++;
-  holdStart = 0; held = 0; progress = 0;
+  resetStageRuntime();
   emitEvent("level_passed", passed);
   if (idx >= NUM_STAGES) enterWire();
-  else { stageStart = millis(); message = "Stufe geschafft. Naechste Aufgabe."; }
+  else { stageStart = millis(); message = "Level cleared. Next task."; }
+}
+
+void demoAdvance() {
+  if (phase == STAGE) {
+    advanceStage();
+  } else if (phase == WIRE) {
+    emitEvent("defused", NUM_STAGES + 1);
+    phase = DEFUSED;
+    message = "DEMO: Bomb defused.";
+  }
 }
 
 void stepStage() {
@@ -108,29 +135,46 @@ void stepStage() {
   if (elapsed > st.limit_s) {
     emitEvent("level_failed", idx + 1);
     phase = EXPLODED;
-    message = "BOOM. Level " + String(idx + 1) + " nicht rechtzeitig geschafft.";
+    message = "BOOM. Level " + String(idx + 1) + " was not cleared in time.";
     return;
   }
   int rem = (int)(st.limit_s - elapsed);
   curD = readDistanceCm();
   bool inZone = curD >= st.zmin && curD <= st.zmax;
+  if (st.kind == DISTANCE_WIRE_PULL) {
+    progress = inZone ? 0.5 : 0.0;
+    int cut = pulledStageWire();
+    if (cut >= 0) {
+      if (cut == st.wire && inZone) advanceStage();
+      else {
+        emitEvent("level_failed", idx + 1);
+        phase = EXPLODED;
+        message = cut == st.wire
+          ? "BOOM. Blue was pulled outside the resonance distance."
+          : "BOOM. " + String(WIRE_NAME[cut]) + " was the wrong wire.";
+      }
+      return;
+    }
+    message = "Hold the safe distance and pull the matching wire. Current distance " + String(curD, 1) + " cm  ·  " + String(rem) + "s left";
+    return;
+  }
   if (inZone) {
     if (holdStart == 0) holdStart = millis();
     held = (millis() - holdStart) / 1000.0;
     progress = min(held / st.hold_s, 1.0f);
-    message = "Halten... " + String(held, 1) + "/" + String((int)st.hold_s) + "s  ·  noch " + String(rem) + "s";
+    message = "Holding... " + String(held, 1) + "/" + String((int)st.hold_s) + "s  ·  " + String(rem) + "s left";
     if (held >= st.hold_s) advanceStage();
   } else {
     holdStart = 0; held = 0; progress = 0;
-    message = "Bring dich in die Zielzone.  ·  noch " + String(rem) + "s";
+    message = "Move into the target zone.  ·  " + String(rem) + "s left";
   }
 }
 
 void stepWire() {
   for (int i = 0; i < 4; i++) {
     if (wireBaseline[i] && !wireIntact(i)) {
-      if (i == CORRECT_WIRE) { emitEvent("defused", NUM_STAGES + 1); phase = DEFUSED; message = "ENTSCHAERFT. Gut gemacht."; }
-      else { emitEvent("exploded", NUM_STAGES + 1); phase = EXPLODED; message = "BOOM. " + String(WIRE_NAME[i]) + " war falsch."; }
+      if (i == CORRECT_WIRE) { emitEvent("defused", NUM_STAGES + 1); phase = DEFUSED; message = "DEFUSED. Nice work."; }
+      else { emitEvent("exploded", NUM_STAGES + 1); phase = EXPLODED; message = "BOOM. " + String(WIRE_NAME[i]) + " was wrong."; }
       return;
     }
   }
@@ -139,7 +183,7 @@ void stepWire() {
 void step() {
   if ((phase == STAGE || phase == WIRE) && timeLeft() <= 0) {
     emitEvent("exploded", phase == WIRE ? NUM_STAGES + 1 : idx + 1);
-    phase = EXPLODED; message = "BOOM. Zeit abgelaufen."; return;
+    phase = EXPLODED; message = "BOOM. Time expired."; return;
   }
   if (phase == STAGE) stepStage();
   else if (phase == WIRE) stepWire();
@@ -155,7 +199,7 @@ const char* phaseStr() {
 String buildState() {
   bool inStage = (phase == STAGE);
   int stageIndex = inStage ? idx + 1 : NUM_STAGES;
-  String title = inStage ? STAGES[idx].title : (phase == WIRE ? "Drahtbank" : "");
+  String title = inStage ? STAGES[idx].title : (phase == WIRE ? "Wire Bank" : "");
   String instr = inStage ? STAGES[idx].instruction : "";
 
   String j = "{";
@@ -166,13 +210,6 @@ String buildState() {
   j += "\"title\":\"" + title + "\",";
   j += "\"instruction\":\"" + instr + "\",";
   j += "\"progress\":" + String(inStage ? progress : 0.0, 3) + ",";
-  if (inStage) {
-    Stage& st = STAGES[idx];
-    j += "\"gauge\":{\"value\":" + String(curD, 1) + ",\"min\":" + String(st.zmin, 0)
-       + ",\"max\":" + String(st.zmax, 0) + ",\"scale_max\":" + String(st.scale_max, 0) + "},";
-  } else {
-    j += "\"gauge\":null,";
-  }
   j += "\"message\":\"" + message + "\",";
   j += "\"hint\":\"" + String(phase == WIRE ? WIRE_HINT : "") + "\",";
   j += "\"event\":\"" + pendingEvent + "\",";
@@ -194,6 +231,7 @@ void onWsEvent(AsyncWebSocket* s, AsyncWebSocketClient* client, AwsEventType typ
       for (size_t i = 0; i < len; i++) msg += (char)data[i];
       if (msg.indexOf("start") >= 0) startGame();
       else if (msg.indexOf("reset") >= 0) resetGame();
+      else if (msg.indexOf("advance") >= 0) demoAdvance();
     }
   }
 }
