@@ -1,37 +1,76 @@
 #include "Arduino.h"
 #include <HCSR04.h>
 
-const byte RED = 7;
+const int nWires = 2;
+bool wireStates[nWires] = {0, 0};
+bool wireStateChanges[nWires] = {0, 0};
+const int wireNumbers[nWires] = {12, 11};
 
-// Initialize the ultrasonic sensor
 const byte triggerPin = 12;
 const byte echoPin = 11;
 UltraSonicDistanceSensor distanceSensor(triggerPin, echoPin);
 
+enum Wires
+{
+  RED = 0,
+  BLUE = 1
+};
 
-bool bombActive = true;
-
-void setup() {
-  Serial.begin(9600); // We initialize serial connection so that we could print values from sensor.
-  pinMode(RED, INPUT_PULLUP);
+void SetPinStates()
+{
+  for (int i = 0; i < nWires; i++)
+  {
+    bool state = digitalRead(wireNumbers[i]);
+    wireStateChanges[i] = state != wireStates[i];
+    wireStates[i] = state;
+  }
 }
 
-void loop() {
+void initPinStates()
+{
+  for (int i = 0; i < nWires; i++)
+  {
+    pinMode(wireNumbers[i], INPUT_PULLUP);
+  }
+}
 
-  int redWire = !digitalRead(RED);
-  float distance = distanceSensor.measureDistanceCm();
+void setup()
+{
+  Serial.begin(9600);
+  initPinStates();
+}
 
-  if (redWire == 0 && bombActive) {
-    bombActive = false;
-    if (distance > 20 && distance < 30) {
+float getDistance()
+{
+  return distanceSensor.measureDistanceCm();
+}
+
+void checkDistance()
+{
+  if (wireStates[Wires::RED] && wireStateChanges[Wires::RED])
+  {
+    if (abs(getDistance() - 25) < 5)
+    {
       Serial.println("Bomb has been defused!");
-    } else {
+    }
+    else
+    {
       Serial.println("BOOOOOOOOOOOOOOOOOOOM!");
     }
   }
+}
 
-  // Reset the bomb
-  if (redWire == 1) {
-    bombActive = true;
-  }
+void checkResistance()
+{
+  float voltage = analogRead(A0) * 2 / 1023.0;
+  Serial.println(voltage);
+}
+
+void loop()
+{
+  SetPinStates();
+
+  //checkDistance();
+
+  checkResistance();
 }
