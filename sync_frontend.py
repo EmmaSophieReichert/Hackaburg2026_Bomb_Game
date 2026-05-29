@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Single source of truth fuers Frontend.
 
-Quelle ist frontend/index.html. Dieses Skript bettet sie als PROGMEM-Literal
-in die index_html.h der ESP-Sketches ein, damit alle Build-Ziele dasselbe
-Frontend ausliefern. Nach jeder Aenderung an frontend/index.html ausfuehren:
+Quellen sind frontend/index.html und frontend/app.js. Dieses Skript bettet
+beide als PROGMEM-Literale in Header der ESP-Sketches ein, damit alle
+Build-Ziele dasselbe Frontend ausliefern. Nach jeder Frontend-Aenderung
+ausfuehren:
 
     python3 sync_frontend.py            # schreibt die Header neu
     python3 sync_frontend.py --check    # nur pruefen (Exit 1 wenn out of sync)
@@ -12,48 +13,52 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SRC = ROOT / "frontend" / "index.html"
-TARGETS = [
-    ROOT / "bomb-esp32" / "index_html.h",
-    ROOT / "bomb-esp8266" / "index_html.h",
+SKETCH_DIRS = [ROOT / "bomb-esp32", ROOT / "bomb-esp8266"]
+
+# je Asset: Quelle, Header-Dateiname, C-Variablenname, Raw-String-Delimiter
+ASSETS = [
+    ("frontend/index.html", "index_html.h", "INDEX_HTML", "rawhtml"),
+    ("frontend/app.js",     "app_js.h",     "APP_JS",     "rawjs"),
 ]
-DELIM = "rawhtml"
 
 HEADER = """\
 #pragma once
 #include <pgmspace.h>
 
-// AUTOGENERIERT von sync_frontend.py aus frontend/index.html — NICHT direkt
-// editieren. Frontend-Aenderungen in frontend/index.html machen und das Skript
-// erneut laufen lassen.
+// AUTOGENERIERT von sync_frontend.py aus {src} — NICHT direkt editieren.
+// Frontend-Aenderungen in {src} machen und das Skript erneut laufen lassen.
 """
 
 
-def render(html: str) -> str:
-    if f"){DELIM}\"" in html:
-        sys.exit(f"FEHLER: Quelle enthaelt die Delimiter-Sequenz '){DELIM}\"' — "
+def render(src_name: str, var: str, delim: str, content: str) -> str:
+    if f"){delim}\"" in content:
+        sys.exit(f"FEHLER: {src_name} enthaelt die Delimiter-Sequenz '){delim}\"' — "
                  f"Delimiter in sync_frontend.py aendern.")
-    return f'{HEADER}const char INDEX_HTML[] PROGMEM = R"{DELIM}({html}){DELIM}";\n'
+    head = HEADER.format(src=src_name)
+    return f'{head}const char {var}[] PROGMEM = R"{delim}({content}){delim}";\n'
 
 
 def main() -> int:
     check = "--check" in sys.argv
-    if not SRC.exists():
-        sys.exit(f"FEHLER: Quelle fehlt: {SRC}")
-    out = render(SRC.read_text(encoding="utf-8"))
-
     stale = []
-    for tgt in TARGETS:
-        current = tgt.read_text(encoding="utf-8") if tgt.exists() else None
-        if current == out:
-            print(f"ok    {tgt.relative_to(ROOT)}")
-            continue
-        stale.append(tgt)
-        if check:
-            print(f"STALE {tgt.relative_to(ROOT)}")
-        else:
-            tgt.write_text(out, encoding="utf-8")
-            print(f"wrote {tgt.relative_to(ROOT)}")
+
+    for src_rel, out_name, var, delim in ASSETS:
+        src = ROOT / src_rel
+        if not src.exists():
+            sys.exit(f"FEHLER: Quelle fehlt: {src}")
+        out = render(src_rel, var, delim, src.read_text(encoding="utf-8"))
+        for d in SKETCH_DIRS:
+            tgt = d / out_name
+            current = tgt.read_text(encoding="utf-8") if tgt.exists() else None
+            if current == out:
+                print(f"ok    {tgt.relative_to(ROOT)}")
+                continue
+            stale.append(tgt)
+            if check:
+                print(f"STALE {tgt.relative_to(ROOT)}")
+            else:
+                tgt.write_text(out, encoding="utf-8")
+                print(f"wrote {tgt.relative_to(ROOT)}")
 
     if check and stale:
         print("\nout of sync — 'python3 sync_frontend.py' ausfuehren.")

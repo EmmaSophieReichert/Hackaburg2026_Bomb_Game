@@ -12,6 +12,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include "index_html.h"
+#include "app_js.h"
 
 // ---------- Access Point ----------
 const char* AP_SSID = "BOMB-DEFUSAL";
@@ -212,6 +213,9 @@ void setup() {
   server.addHandler(&ws);
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
     req->send_P(200, "text/html; charset=utf-8", INDEX_HTML);
+  });
+  server.on("/app.js", HTTP_GET, [](AsyncWebServerRequest* req) {
+    req->send_P(200, "application/javascript; charset=utf-8", APP_JS);
   });
   server.begin();
 }
