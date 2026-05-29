@@ -21,13 +21,16 @@ const char* AP_PASS = "defuse123";        // min. 8 Zeichen; "" = offenes Netz
 // ---------- Pins (ESP32, 3.3V!) ----------
 const int PIN_TRIG = 5;                    // HC-SR04 Trigger
 const int PIN_ECHO = 18;                   // HC-SR04 Echo -> SPANNUNGSTEILER auf 3.3V!
-const int WIRE_PIN[4] = {21, 22, 23, 19};  // rot, blau, gruen, gelb -> jeweils gegen GND
-const char* WIRE_NAME[4] = {"rot", "blau", "gruen", "gelb"};
-const int CORRECT_WIRE = 1;                // Index 1 = "blau"
+// Drahtliste: zum Erweitern einfach Pin + Name anhaengen (z.B. blau=22, gruen=23)
+// und ggf. CORRECT_WIRE anpassen. NUM_WIRES und das wires-Feld ziehen automatisch mit.
+const int WIRE_PIN[] = {21, 19};           // rot, gelb -> jeweils gegen GND
+const char* WIRE_NAME[] = {"rot", "gelb"};
+const int NUM_WIRES = sizeof(WIRE_PIN) / sizeof(WIRE_PIN[0]);
+const int CORRECT_WIRE = 1;                // Index 1 = "gelb"
 
 // ---------- Spielkonfiguration ----------
 const float GAME_TIME = 150.0;             // Sekunden bis Boom
-const char* WIRE_HINT = "Do not cut red. The solution is cool as the sea.";
+const char* WIRE_HINT = "Do not cut red. The solution shines like the sun.";
 
 // ---------- Minispiele ----------
 enum StageKind { DISTANCE_HOLD, DISTANCE_WIRE_PULL };
@@ -55,8 +58,8 @@ float held = 0, curD = 0, progress = 0;
 String message = "Press START to arm the device.";
 String pendingEvent = "";        // one-shot: level_passed|level_failed|defused|exploded
 int    pendingLevel = 0;         // 1-basierte Level-Nummer zum Event
-bool wireBaseline[4];
-bool stageWireBaseline[4];
+bool wireBaseline[NUM_WIRES];
+bool stageWireBaseline[NUM_WIRES];
 
 void emitEvent(const char* type, int level) { pendingEvent = type; pendingLevel = level; }
 
@@ -83,11 +86,11 @@ float timeLeft() {
 
 void resetStageRuntime() {
   holdStart = 0; held = 0; progress = 0;
-  for (int i = 0; i < 4; i++) stageWireBaseline[i] = wireIntact(i);
+  for (int i = 0; i < NUM_WIRES; i++) stageWireBaseline[i] = wireIntact(i);
 }
 
 int pulledStageWire() {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < NUM_WIRES; i++) {
     if (stageWireBaseline[i] && !wireIntact(i)) return i;
   }
   return -1;
@@ -108,7 +111,7 @@ void startGame() {
 void enterWire() {
   phase = WIRE;
   message = "Final phase: defuse the bomb.";
-  for (int i = 0; i < 4; i++) wireBaseline[i] = wireIntact(i);
+  for (int i = 0; i < NUM_WIRES; i++) wireBaseline[i] = wireIntact(i);
 }
 void advanceStage() {
   int passed = idx + 1;            // gerade abgeschlossenes Level
@@ -150,7 +153,7 @@ void stepStage() {
         emitEvent("level_failed", idx + 1);
         phase = EXPLODED;
         message = cut == st.wire
-          ? "BOOM. Blue was pulled outside the resonance distance."
+          ? "BOOM. " + String(WIRE_NAME[st.wire]) + " was pulled outside the resonance distance."
           : "BOOM. " + String(WIRE_NAME[cut]) + " was the wrong wire.";
       }
       return;
@@ -172,7 +175,7 @@ void stepStage() {
 }
 
 void stepWire() {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < NUM_WIRES; i++) {
     if (wireBaseline[i] && !wireIntact(i)) {
       if (i == CORRECT_WIRE) { emitEvent("defused", NUM_STAGES + 1); phase = DEFUSED; message = "DEFUSED. Nice work."; }
       else { emitEvent("exploded", NUM_STAGES + 1); phase = EXPLODED; message = "BOOM. " + String(WIRE_NAME[i]) + " was wrong."; }
@@ -215,7 +218,12 @@ String buildState() {
   j += "\"hint\":\"" + String(phase == WIRE ? WIRE_HINT : "") + "\",";
   j += "\"event\":\"" + pendingEvent + "\",";
   j += "\"event_level\":" + String(pendingLevel) + ",";
-  j += "\"wires\":[\"rot\",\"blau\",\"gruen\",\"gelb\"]";
+  j += "\"wires\":[";
+  for (int i = 0; i < NUM_WIRES; i++) {
+    if (i) j += ",";
+    j += "\"" + String(WIRE_NAME[i]) + "\"";
+  }
+  j += "]";
   j += "}";
   return j;
 }
@@ -242,7 +250,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(PIN_TRIG, OUTPUT);
   pinMode(PIN_ECHO, INPUT);
-  for (int i = 0; i < 4; i++) pinMode(WIRE_PIN[i], INPUT_PULLUP);
+  for (int i = 0; i < NUM_WIRES; i++) pinMode(WIRE_PIN[i], INPUT_PULLUP);
 
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);

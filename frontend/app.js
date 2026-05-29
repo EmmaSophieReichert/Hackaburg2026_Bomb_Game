@@ -65,6 +65,8 @@ function buildWires(colors) {
   const box = document.getElementById("wires");
   const labels = { rot: "red", blau: "blue", gruen: "green", gelb: "yellow" };
   box.innerHTML = "";
+  // grid adapts to however many wires the controller sends (2 now, more later)
+  box.style.gridTemplateColumns = `repeat(${colors.length}, 1fr)`;
   colors.forEach(c => {
     const w = document.createElement("div");
     w.className = "wire lbl-" + c;
