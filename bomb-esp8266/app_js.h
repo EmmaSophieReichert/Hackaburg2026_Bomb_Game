@@ -15,7 +15,14 @@ function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); setTimeout(connect, 1000); };
-  ws.onmessage = (e) => render(JSON.parse(e.data));
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    // two schemas: rich game state (has "phase") vs. teammate level ping
+    // ({"level":"level1","status":"true"}). Branch on which fields arrived.
+    if ("status" in msg && !("phase" in msg)) handleLevelStatus(msg);
+    else render(msg);
+  };
 }
 function setConn(live) {
   const c = document.getElementById("conn");
@@ -36,6 +43,18 @@ const EVENT_MAP = {
   defused:      ["good", () => "Bomb defused"],
   exploded:     ["bad",  () => "Bomb exploded"],
 };
+// Teammate controller schema: {"level":"level1","status":"true"|"false"}.
+// It carries no phase/timer/wires, so we surface the ping as a toast and
+// reflect it in the chip + message line; the rest of the UI stays idle.
+function handleLevelStatus(msg) {
+  const n = parseInt(String(msg.level).replace(/\D/g, ""), 10) || 0;
+  const ok = msg.status === true || msg.status === "true";
+  showEvent(ok ? "level_passed" : "level_failed", n);
+  document.getElementById("chip").textContent = ok ? "CLEARED" : "FAILED";
+  document.getElementById("message").textContent =
+    ok ? `Level ${n} cleared` : `Level ${n} failed`;
+}
+
 let toastTimer = null;
 function showEvent(type, level) {
   const e = EVENT_MAP[type];
