@@ -1,0 +1,52 @@
+# Arduino build artifacts
+build/
+*.hex
+*.elf
+*.bin
+*.eep
+*.lst
+*.map
+*.o
+*.d
+*.a
+
+# Arduino IDE
+.theia/
+*.tmp
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# PlatformIO (falls genutzt)
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Web (falls später Node dazukommt)
+node_modules/
+dist/
+.env
+.env.local
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# Claude
+CLAUDE.md
+.claude/
