@@ -36,6 +36,7 @@ void processUltrasonic(int wire) {
       Serial.println("Red Wire has been defused!");
     } else {
       Serial.println("BOOOM!");
+      Serial.println(distance);
       bombActive = false;
     }
   }
@@ -52,6 +53,7 @@ void processJoystick(int x, int y, int wire) {
       Serial.println("Yellow Wire has been defused!");
     } else {
       Serial.println("BOOOM!");
+      Serial.println(sequence);
       bombActive = false;
     }
   }
@@ -109,6 +111,10 @@ void setup() {
                       // values from sensor.
   pinMode(RED_WIRE, INPUT_PULLUP);
   pinMode(YELLOW_WIRE, INPUT_PULLUP);
+
+  Serial.println("--------------------");
+  Serial.println("Bomb has been armed!");
+
 }
 
 void loop() {
