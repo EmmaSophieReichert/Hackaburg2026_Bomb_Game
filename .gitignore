@@ -44,6 +44,9 @@ venv/
 __pycache__/
 *.pyc
 
+# Lokale Python-Referenz (nur am Laptop, nicht im geteilten Repo)
+bomb-mvp/
+
 # Logs
 *.log
 
