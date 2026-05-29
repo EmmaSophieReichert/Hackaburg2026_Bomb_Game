@@ -4,6 +4,7 @@
 // Initialize the wires
 const byte RED_WIRE = 17;
 const byte YELLOW_WIRE = 8;
+const byte BLUE_WIRE = 9;
 
 // Initialize the ultrasonic sensor
 const byte TRIGGER_PIN = 34;
@@ -18,6 +19,7 @@ const byte JOYSTICK_Y = 0;
 bool bombActive = true;
 bool redWireCut = false;
 bool yellowWireCut = false;
+bool blueWireCut = false;
 
 // Joystick variables
 String sequence = "";
@@ -106,6 +108,23 @@ void processJoystick(int x, int y, int wire) {
   // Serial.println(sequence);
 }
 
+void processHumidity(int humidity, int wire) {
+  if (blueWireCut) {
+    return;
+  }
+
+  if (wire == 0 && !blueWireCut) {
+    blueWireCut = true;
+    if (humidity > 70.0) {
+      Serial.println("Blue Wire has been defused!");
+    } else {
+      Serial.println("BOOOM!");
+      Serial.println(humidity);
+      bombActive = false;
+    }
+  }
+}
+
 void setup() {
   Serial.begin(9600); // We initialize serial connection so that we could print
                       // values from sensor.
@@ -121,6 +140,7 @@ void loop() {
 
   int redWire = !digitalRead(RED_WIRE);
   int yellowWire = !digitalRead(YELLOW_WIRE);
+  int blueWire = !digitalRead(BLUE_WIRE);
 
   // Logicpuzzle Joystick
   double xAxis = analogRead(JOYSTICK_X);
