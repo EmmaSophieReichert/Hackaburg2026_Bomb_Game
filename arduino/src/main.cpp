@@ -1,7 +1,9 @@
 #include "Arduino.h"
 #include <HCSR04.h>
 
-const byte RED = 7;
+// Initialize the wires
+const byte RED_WIRE = 7;
+const byte YELLOW_WIRE = 8;
 
 // Initialize the ultrasonic sensor
 const byte TRIGGER_PIN = 12;
@@ -12,110 +14,118 @@ UltraSonicDistanceSensor distanceSensor(TRIGGER_PIN, ECHO_PIN);
 const byte JOYSTICK_X = 1;
 const byte JOYSTICK_Y = 0;
 
-
+// Game logic
 bool bombActive = true;
+bool redWireCut = false;
+bool yellowWireCut = false;
 
-int xSteps = 0;
-bool resetX = true;
-int ySteps = 0;
-bool resetY = true;
+// Joystick variables
+String sequence = "";
 
-void setup() {
-  Serial.begin(9600); // We initialize serial connection so that we could print values from sensor.
-  pinMode(RED, INPUT_PULLUP);
-}
-
-void loop() {
-
-  int redWire = !digitalRead(RED);
-
-  // Logicpuzzle Ultrasonic
-  // float distance = distanceSensor.measureDistanceCm();
-
-  // if (redWire == 0 && bombActive) {
-  //   bombActive = false;
-  //   if (distance > 20 && distance < 30) {
-  //     Serial.println("Bomb has been defused!");
-  //   } else {
-  //     Serial.println("BOOOOOOOOOOOOOOOOOOOM!");
-  //   }
-  // }
-
-  // Logicpuzzle Joystick
-  double xAxis = analogRead(JOYSTICK_X);
-  double yAxis = analogRead(JOYSTICK_Y);
-
-  if (resetX) {
-    if (xAxis > 800) {
-      xSteps++;
-      resetX = false;
-    }
-    if (xAxis < 200) {
-      xSteps--;
-      resetX = false;
-    }
+void processUltrasonic(int wire) {
+  if (redWireCut) {
+    return;
   }
 
-  if (xAxis > 400 && xAxis < 600) {
-    resetX = true;
-  }
+  float distance = distanceSensor.measureDistanceCm();
+  // Serial.println(distance);
 
-  if (resetY) {
-    if (yAxis > 800) {
-      ySteps++;
-      resetY = false;
-    }
-    if (yAxis < 200) {
-      ySteps--;
-      resetY = false;
-    }
-  }
-
-  if (yAxis > 400 && yAxis < 600) {
-    resetY = true;
-  }
-
-  // Reset the bomb
-  if (redWire == 1) {
-    bombActive = true;
-  }
-}
-
-void processJoystick(int x, int y, String &sequence, bool wireCut) {
-  if (wireCut) {
-    if (sequence == "TBLR") {
-      Serial.println("Bomb has been defused!");
+  if (wire == 0 && !redWireCut) {
+    redWireCut = true;
+    if (distance > 20 && distance < 30) {
+      Serial.println("Red Wire has been defused!");
     } else {
-      Serial.println("BOOOOOOOOOOOOOOOOOOOM!");
+      Serial.println("BOOOM!");
+      bombActive = false;
     }
   }
+}
+
+void processJoystick(int x, int y, int wire) {
+  if (yellowWireCut) {
+    return;
+  }
+
+  if (wire == 0 && !yellowWireCut) {
+    yellowWireCut = true;
+    if (sequence == "TBLR") {
+      Serial.println("Yellow Wire has been defused!");
+    } else {
+      Serial.println("BOOOM!");
+      bombActive = false;
+    }
+  }
+
   static bool wasTop = false;
   static bool wasBottom = false;
   static bool wasRight = false;
   static bool wasLeft = false;
-  int minBoarder = 100
+  int minBoarder = 100;
   int maxBoarder = 900;
 
-  // --- Y-AXIS ---
-  if (y > maxBoarder) {
-    if (!wasTop) { sequence += "T"; wasTop = true; }
-  } else if (y < minBoarder) {
-    if (!wasBottom) { sequence += "B"; wasBottom = true; }
-  } else {
-    wasTop = false;
-    wasBottom = false;
-  }
-
   // --- X-AXIS ---
+  if (x == 0) {
+    return;
+  }
   if (x > maxBoarder) {
-    if (!wasRight) { sequence += "R"; wasRight = true; }
+    if (!wasRight) {
+      sequence += "T";
+      wasRight = true;
+    }
   } else if (x < minBoarder) {
-    if (!wasLeft) { sequence += "L"; wasLeft = true; }
+    if (!wasLeft) {
+      sequence += "B";
+      wasLeft = true;
+    }
   } else {
     wasRight = false;
     wasLeft = false;
   }
 
-  Serial.print("Joystick sequence: ");
-  Serial.println(sequence);
+  // --- Y-AXIS ---
+  if (y == 0) {
+    return;
+  }
+  if (y > maxBoarder) {
+    if (!wasTop) {
+      sequence += "R";
+      wasTop = true;
+    }
+  } else if (y < minBoarder) {
+    if (!wasBottom) {
+      sequence += "L";
+      wasBottom = true;
+    }
+  } else {
+    wasTop = false;
+    wasBottom = false;
+  }
+
+  // Serial.println(sequence);
+}
+
+void setup() {
+  Serial.begin(9600); // We initialize serial connection so that we could print
+                      // values from sensor.
+  pinMode(RED_WIRE, INPUT_PULLUP);
+  pinMode(YELLOW_WIRE, INPUT_PULLUP);
+}
+
+void loop() {
+
+  int redWire = !digitalRead(RED_WIRE);
+  int yellowWire = !digitalRead(YELLOW_WIRE);
+
+  // Logicpuzzle Joystick
+  double xAxis = analogRead(JOYSTICK_X);
+  double yAxis = analogRead(JOYSTICK_Y);
+
+  processUltrasonic(redWire);
+  processJoystick(xAxis, yAxis, yellowWire);
+
+  // Reset the bomb
+  if (bombActive && redWireCut && yellowWireCut) {
+    bombActive = false;
+    Serial.println("Bomb has been defused!");
+  }
 }
