@@ -35,3 +35,42 @@ void loop() {
     bombActive = true;
   }
 }
+
+void processJoystick(int x, int y, String &sequence, bool wireCut) {
+  if (wireCut) {
+    if (sequence == "TBLR") {
+      Serial.println("Bomb has been defused!");
+    } else {
+      Serial.println("BOOOOOOOOOOOOOOOOOOOM!");
+    }
+  }
+  static bool wasTop = false;
+  static bool wasBottom = false;
+  static bool wasRight = false;
+  static bool wasLeft = false;
+  int minBoarder = 100
+  int maxBoarder = 900;
+
+  // --- Y-AXIS ---
+  if (y > maxBoarder) {
+    if (!wasTop) { sequence += "T"; wasTop = true; }
+  } else if (y < minBoarder) {
+    if (!wasBottom) { sequence += "B"; wasBottom = true; }
+  } else {
+    wasTop = false;
+    wasBottom = false;
+  }
+
+  // --- X-AXIS ---
+  if (x > maxBoarder) {
+    if (!wasRight) { sequence += "R"; wasRight = true; }
+  } else if (x < minBoarder) {
+    if (!wasLeft) { sequence += "L"; wasLeft = true; }
+  } else {
+    wasRight = false;
+    wasLeft = false;
+  }
+
+  Serial.print("Joystick sequence: ");
+  Serial.println(sequence);
+}
