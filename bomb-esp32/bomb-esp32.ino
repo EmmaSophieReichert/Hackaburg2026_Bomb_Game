@@ -26,7 +26,7 @@ const int PIN_ECHO = 18;                   // HC-SR04 Echo -> SPANNUNGSTEILER au
 const int WIRE_PIN[] = {21, 19};           // rot, gelb -> jeweils gegen GND
 const char* WIRE_NAME[] = {"rot", "gelb"};
 const int NUM_WIRES = sizeof(WIRE_PIN) / sizeof(WIRE_PIN[0]);
-const int CORRECT_WIRE = 1;                // Index 1 = "gelb"
+const int CORRECT_WIRE = 0;                // Index 0 = "rot" (gelb wird in Level 1 gezogen)
 
 // Joystick: NUR ADC1-Pins (32-39), da ADC2 bei aktivem WLAN blockiert ist.
 // VCC an 3V3 (nicht 5V!), sonst >3,3V am ADC. Achsen 0..4095 (12-bit).
@@ -35,9 +35,14 @@ const int PIN_JOY_Y = 35;                  // VRy -> ADC1
 const int JOY_LOW  = 1000;                 // Ausschlag-Schwellen um die Mitte (~2048)
 const int JOY_HIGH = 3000;
 
+// Status-LEDs, parallel zu WIRE_PIN: leuchten solange der Draht intakt ist,
+// aus wenn gezogen. Eigene Ausgaenge + Vorwiderstand (220-330 Ohm), Anode an
+// den Pin, Kathode an GND. NICHT in die Sense-Leitung des Drahts haengen!
+const int LED_PIN[] = {26, 25};            // rot-LED, gelb-LED (gleiche Reihenfolge wie WIRE_PIN)
+
 // ---------- Spielkonfiguration ----------
 const float GAME_TIME = 150.0;             // Sekunden bis Boom
-const char* WIRE_HINT = "Do not cut red. The solution shines like the sun.";
+const char* WIRE_HINT = "One wire is already gone. Cut the red one to finish it.";
 
 // ---------- Minispiele ----------
 enum StageKind { DISTANCE_HOLD, DISTANCE_WIRE_PULL, JOYSTICK_SEQUENCE };
@@ -50,9 +55,8 @@ struct Stage {
   const char* seq;                                // fuer JOYSTICK_SEQUENCE: Ziel aus U/D/L/R
 };
 Stage STAGES[] = {
-  {DISTANCE_HOLD, "Approach", "Hold your hand steady at about 25 cm (20-30 cm) for 3 seconds.", 20, 30, 3.0, 40, 30, -1, ""},
-  {DISTANCE_HOLD, "Retreat",  "Now move farther away: hold your hand at 35-45 cm for 3 seconds.", 35, 45, 3.0, 40, 30, -1, ""},
-  {JOYSTICK_SEQUENCE, "Sequence", "Move the joystick in order: up, right, down, left.", 0, 0, 0.0, 0, 45, -1, "URDL"},
+  {DISTANCE_WIRE_PULL, "Resonance Distance", "Hold your hand at about 25 cm (20-30 cm) and pull the YELLOW wire while staying in range.", 20, 30, 0.0, 40, 45, 1, ""},
+  {JOYSTICK_SEQUENCE, "Sequence", "Enter up, right, down, left on the joystick, then pull the RED wire to confirm.", 0, 0, 0.0, 0, 45, 0, "URDL"},
 };
 const int NUM_STAGES = sizeof(STAGES) / sizeof(STAGES[0]);
 
@@ -151,9 +155,15 @@ void advanceStage() {
   int passed = idx + 1;            // gerade abgeschlossenes Level
   idx++;
   resetStageRuntime();
-  emitEvent("level_passed", passed);
-  if (idx >= NUM_STAGES) enterWire();
-  else { stageStart = millis(); message = "Level cleared. Next task."; }
+  if (idx >= NUM_STAGES) {         // alle Raetsel geloest -> entschaerft
+    emitEvent("defused", NUM_STAGES + 1);
+    phase = DEFUSED;
+    message = "DEFUSED. Nice work.";
+  } else {
+    emitEvent("level_passed", passed);
+    stageStart = millis();
+    message = "Level cleared. Next task.";
+  }
 }
 
 void demoAdvance() {
@@ -179,20 +189,28 @@ void stepStage() {
 
   if (st.kind == JOYSTICK_SEQUENCE) {
     char d = joyDir();
+    int total = strlen(st.seq);
     if (d == 0) {
       joyNeutral = true;                       // zurueck in der Mitte: bereit
-    } else if (joyNeutral) {
+    } else if (joyNeutral && (int)joyInput.length() < total) {
       joyNeutral = false;                      // ein Ausschlag = eine Eingabe
-      if (d == st.seq[joyInput.length()]) {
-        joyInput += d;
-        if ((int)joyInput.length() >= (int)strlen(st.seq)) { advanceStage(); return; }
-      } else {
-        joyInput = "";                         // falsche Richtung: Sequenz zuruecksetzen
-      }
+      if (d == st.seq[joyInput.length()]) joyInput += d;   // richtige Richtung
+      else joyInput = "";                                  // falsch -> Sequenz zuruecksetzen
     }
-    int total = strlen(st.seq);
+    bool done = (int)joyInput.length() >= total;
+    int cut = pulledStageWire();
+    if (cut >= 0) {                            // Draht gezogen = abgeben
+      if (cut == st.wire && done) { advanceStage(); return; }
+      emitEvent("level_failed", idx + 1);
+      phase = EXPLODED;
+      message = (cut != st.wire) ? "BOOM. " + String(WIRE_NAME[cut]) + " was the wrong wire."
+                                 : "BOOM. The joystick sequence was not complete.";
+      return;
+    }
     progress = total ? (float)joyInput.length() / total : 0.0;
-    message = "Joystick sequence " + joyWords(st.seq) + "  ·  " + String((int)joyInput.length()) + "/" + String(total) + "  ·  " + String(rem) + "s left";
+    message = done
+      ? "Sequence done. Pull the RED wire to confirm.  ·  " + String(rem) + "s left"
+      : "Joystick sequence " + joyWords(st.seq) + "  ·  " + String((int)joyInput.length()) + "/" + String(total) + "  ·  " + String(rem) + "s left";
     return;
   }
 
@@ -305,6 +323,7 @@ void setup() {
   pinMode(PIN_TRIG, OUTPUT);
   pinMode(PIN_ECHO, INPUT);
   for (int i = 0; i < NUM_WIRES; i++) pinMode(WIRE_PIN[i], INPUT_PULLUP);
+  for (int i = 0; i < NUM_WIRES; i++) pinMode(LED_PIN[i], OUTPUT);
 
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
@@ -321,12 +340,17 @@ void setup() {
   server.begin();
 }
 
+void updateLeds() {
+  for (int i = 0; i < NUM_WIRES; i++) digitalWrite(LED_PIN[i], wireIntact(i) ? HIGH : LOW);
+}
+
 unsigned long lastTick = 0;
 void loop() {
   unsigned long now = millis();
   if (now - lastTick >= 66) {   // ~15 Hz
     lastTick = now;
     step();
+    updateLeds();
     ws.textAll(buildState());
     pendingEvent = ""; pendingLevel = 0;   // Event ist one-shot
   }
